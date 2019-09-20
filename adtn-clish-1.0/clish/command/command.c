@@ -3,9 +3,8 @@
   *
   * This file provides the implementation of a command definition  
   */
-
 #include "private.h"
-#include "clish/types.h"
+#include "clish/variable.h"
 #include "lub/bintree.h"
 #include "lub/string.h"
 
@@ -14,292 +13,532 @@
 #include <string.h>
 #include <stdio.h>
 
+/*---------------------------------------------------------
+ * PRIVATE METHODS
+ *--------------------------------------------------------- */
 static void
-clish_command_init(clish_command_t *this, const char *name, const char *text)
+clish_command_init(clish_command_t *this,
+                   const char      *name,
+                   const char      *text)
 {
-	/* initialise the node part */
-	this->name = lub_string_dup(name);
-	this->text = lub_string_dup(text);
+    /* initialise the node part */
+    this->name = lub_string_dup(name);
+    this->text = lub_string_dup(text);
+    
+    /* Be a good binary tree citizen */
+    lub_bintree_node_init(&this->bt_node);
 
-	/* Be a good binary tree citizen */
-	lub_bintree_node_init(&this->bt_node);
-
-	/* set up defaults */
-	this->link = NULL;
-	this->alias = NULL;
-	this->alias_view = NULL;
-	this->paramv = clish_paramv_new();
-	this->viewid = NULL;
-	this->viewname = NULL;
-	this->action = clish_action_new();
-	this->config = clish_config_new();
-	this->detail = NULL;
-	this->escape_chars = NULL;
-	this->regex_chars = NULL;
-	this->args = NULL;
-	this->pview = NULL;
-	this->dynamic = BOOL_FALSE;
-	this->internal = BOOL_FALSE;
-	this->access = NULL;
+    /* set up defaults */
+    this->paramc       = 0;
+    this->paramc       = 0;
+    this->paramv       = NULL;
+    this->viewid       = NULL;
+    this->view         = NULL;
+    this->action       = NULL;
+    this->detail       = NULL;
+    this->builtin      = NULL;
+    this->escape_chars = NULL;
+    this->args         = NULL;
 }
-
 /*--------------------------------------------------------- */
-static void clish_command_fini(clish_command_t * this)
+static void
+clish_command_fini(clish_command_t *this)
 {
-	lub_string_free(this->name);
-	lub_string_free(this->text);
+    unsigned i;
+    
+    /* finalize each of the parameter instances */
+    for(i=0;
+        i < this->paramc;
+        i++)
+    {
+        clish_param_delete(this->paramv[i]);
+    }
+    /* free the parameter vector */
+    free(this->paramv);
+    lub_string_free(this->viewid);
+    this->viewid = NULL;
+    lub_string_free(this->action);
+    this->action = NULL;
+    lub_string_free(this->name);
+    this->name = NULL;
+    lub_string_free(this->text);
+    this->text = NULL;
+    lub_string_free(this->detail);
+    this->detail = NULL;
+    lub_string_free(this->builtin);
+    this->builtin = NULL;
+    lub_string_free(this->escape_chars);
+    this->escape_chars = NULL;
 
-	/* Link need not full cleanup */
-	if (this->link)
-		return;
-
-	/* finalize each of the parameter instances */
-	clish_paramv_delete(this->paramv);
-
-	clish_action_delete(this->action);
-	clish_config_delete(this->config);
-	lub_string_free(this->alias);
-	lub_string_free(this->alias_view);
-	lub_string_free(this->viewname);
-	lub_string_free(this->viewid);
-	lub_string_free(this->detail);
-	lub_string_free(this->escape_chars);
-	lub_string_free(this->regex_chars);
-	lub_string_free(this->access);
-	if (this->args)
-		clish_param_delete(this->args);
+    if(NULL != this->args)
+    {
+        clish_param_delete(this->args);
+        this->args = NULL;
+    }
 }
 
+/*---------------------------------------------------------
+ * PUBLIC META FUNCTIONS
+ *--------------------------------------------------------- */
+size_t
+clish_command_bt_offset(void)
+{
+    return offsetof(clish_command_t,bt_node);
+}
 /*--------------------------------------------------------- */
-size_t clish_command_bt_offset(void)
+int
+clish_command_bt_compare(const void *clientnode,
+                         const void *clientkey)
 {
-	return offsetof(clish_command_t, bt_node);
-}
+    const clish_command_t *this = clientnode;
+    const char            *key  = clientkey;
 
+    return lub_string_nocasecmp(this->name,key);
+}
 /*--------------------------------------------------------- */
-int clish_command_bt_compare(const void *clientnode, const void *clientkey)
+void
+clish_command_bt_getkey(const void         *clientnode,
+                        lub_bintree_key_t *key)
 {
-	const clish_command_t *this = clientnode;
-	const char *key = clientkey;
+    const clish_command_t *this = clientnode;
 
-	return lub_string_nocasecmp(this->name, key);
+    /* fill out the opaque key */
+    strcpy((char *)key,this->name);
 }
-
 /*--------------------------------------------------------- */
-void clish_command_bt_getkey(const void *clientnode, lub_bintree_key_t * key)
+clish_command_t *
+clish_command_new(const char *name,
+                  const char *text)
 {
-	const clish_command_t *this = clientnode;
-
-	/* fill out the opaque key */
-	strcpy((char *)key, this->name);
+    clish_command_t *this = malloc(sizeof(clish_command_t));
+    
+    if(this)
+    {
+        clish_command_init(this,name,text);
+    }
+    return this;
 }
-
+/*---------------------------------------------------------
+ * PUBLIC METHODS
+ *--------------------------------------------------------- */
+void
+clish_command_delete(clish_command_t *this)
+{
+    clish_command_fini(this);
+    free(this);
+}
 /*--------------------------------------------------------- */
-clish_command_t *clish_command_new(const char *name, const char *help)
+void
+clish_command_insert_param(clish_command_t *this,
+                           clish_param_t   *param)
 {
-	clish_command_t *this = malloc(sizeof(clish_command_t));
-
-	if (this)
-		clish_command_init(this, name, help);
-
-	return this;
+    size_t          new_size = ((this->paramc+1)*sizeof(clish_param_t*));
+    clish_param_t **tmp;
+    
+    /* resize the parameter vector */
+    tmp = realloc(this->paramv,new_size);
+    if(NULL != tmp)
+    {
+        this->paramv = tmp;
+        /* insert reference to the parameter */
+        this->paramv[this->paramc++] = param;
+    }
 }
-
 /*--------------------------------------------------------- */
-clish_command_t *clish_command_new_link(const char *name,
-	const char *help, const clish_command_t * ref)
+/*
+ * Fill out the name and prefix for the command dumping 
+ * function.
+ */
+static void
+get_strings_for_dump(const clish_param_t *param,
+                     const char       **prefix,
+                     const char       **name)
 {
-	if (!ref)
-		return NULL;
-
-	clish_command_t *this = malloc(sizeof(clish_command_t));
-	assert(this);
-
-	/* Copy all fields to the new command-link */
-	*this = *ref;
-	/* Initialise the name (other than original name) */
-	this->name = lub_string_dup(name);
-	/* Initialise the help (other than original help) */
-	this->text = lub_string_dup(help);
-	/* Be a good binary tree citizen */
-	lub_bintree_node_init(&this->bt_node);
-	/* It a link to command so set the link flag */
-	this->link = ref;
-
-	return this;
+    const clish_ptype_t *ptype = clish_param__get_ptype(param);
+    
+    if(NULL == ptype)
+    {
+        *prefix = clish_param__get_name(param);
+        *name   = "";
+    }
+    else
+    {
+        *prefix = clish_param__get_prefix(param);
+        *name   = clish_param__get_name(param);
+    }
 }
-
 /*--------------------------------------------------------- */
-clish_command_t * clish_command_alias_to_link(clish_command_t *this, clish_command_t *ref)
+void
+clish_command_help(const clish_command_t *cmd)
 {
-	clish_command_t tmp;
+    const clish_param_t *p;
+    unsigned             i,max_name, max_option;
+    unsigned             count = 0;
+    
+    /* iterate the tree of commands */
+    max_name = max_option = 0;
+    for(i=0;
+        (p = clish_command__get_param(cmd,i));
+        i++)
+    {
+        unsigned    width;
+        const char *name;
+        const char *option;
 
-	if (!this || !ref)
-		return NULL;
-	if (ref->alias) /* The reference is a link too */
-		return NULL;
-	memcpy(&tmp, this, sizeof(tmp));
-	*this = *ref;
-	memcpy(&this->bt_node, &tmp.bt_node, sizeof(tmp.bt_node));
-	this->name = lub_string_dup(tmp.name); /* Save an original name */
-	this->text = lub_string_dup(tmp.text); /* Save an original help */
-	this->link = ref;
-	this->pview = tmp.pview; /* Save an original parent view */
-	clish_command_fini(&tmp);
+        get_strings_for_dump(p,&option,&name);
+        width = strlen(name);
+        if(width > max_name)
+        {
+            max_name = width;
+        }
+        if(NULL != option)
+        {
+            width = strlen(option);
+            if(width > max_option)
+            {
+                max_option = width;
+            }
+        }
+        count++;
+    }
+    if(NULL != cmd->args)
+    {
+        unsigned    width;
+        const char *dummy,*name;
 
-	return this;
+        get_strings_for_dump(cmd->args,&name,&dummy);
+        width = strlen(name) + 4; /* allow for " ..." */
+        if(width > max_name)
+        {
+            max_name = width;
+        }
+        count++;
+    }
+    printf("%s ",clish_command__get_name(cmd));
+    for(i=0;
+        (p = clish_command__get_param(cmd,i));
+        i++)
+    {
+        const char *name;
+        const char *option;
+        const char *defval = clish_param__get_default(p);
+
+        get_strings_for_dump(p,&option,&name);
+        if(NULL != option || NULL != defval)
+        {
+            printf("[");
+        }
+        else 
+        {
+            printf("<");
+        }
+        if(NULL != option)
+        {
+            printf("%s%s",option,*name ? " " : "");
+        }
+        if(NULL != name)
+        {
+            printf("%s",name);
+        }
+        if(NULL != option || NULL != defval)
+        {
+            printf("]");
+        }
+        else
+        {
+            printf(">");
+        }
+        printf(" ");
+    }
+    if(NULL != cmd->args)
+    {
+        const char *dummy,*name;
+        get_strings_for_dump(cmd->args,&name,&dummy);
+        printf("%s ...",name);
+    }
+    printf("\n %s\n",clish_command__get_text(cmd));
+    if(count)
+    {
+        printf("\n");
+    }
+    /* iterate around the parameters */
+    for(i=0;
+        (p = clish_command__get_param(cmd,i));
+        i++)
+    {
+        const char *name;
+        const char *option;
+        const char *defval = clish_param__get_default(p);
+        const char *text   = clish_param__get_text(p);
+        const char *range  = clish_param__get_range(p);
+
+        get_strings_for_dump(p,&option,&name);
+        printf(" %-*s %-*s   %s",
+               max_option,
+               option ? option : "",
+               max_name,
+               name,
+               text); 
+        if(NULL != range)
+        {
+            printf(" (%s)",range);
+        }
+        if(NULL != defval)
+        {
+            printf(" [%s]",defval);
+        }
+        printf("\n");
+    }
+    if(NULL != cmd->args)
+    {
+        const char *name;
+        const char *dummy;
+        char       *tmp = NULL;
+        const char *text  = clish_param__get_text(cmd->args);
+
+        get_strings_for_dump(cmd->args,&name,&dummy);
+        lub_string_cat(&tmp,name);
+        lub_string_cat(&tmp," ...");
+        printf(" %-*s %-*s   %s\n",
+               max_option,
+               "",
+               max_name,
+               tmp,
+               text);
+        lub_string_free(tmp);
+    }
 }
-
 /*--------------------------------------------------------- */
-void clish_command_delete(clish_command_t * this)
+clish_command_t *
+clish_command_choose_longest(clish_command_t *cmd1,
+                             clish_command_t *cmd2)
 {
-	clish_command_fini(this);
-	free(this);
+    unsigned len1 = (cmd1 ? strlen(clish_command__get_name(cmd1)) : 0);
+    unsigned len2 = (cmd2 ? strlen(clish_command__get_name(cmd2)) : 0);
+    
+    if(len2 < len1)
+    {
+        return cmd1;
+    }
+    else if(len1 < len2)
+    {
+        return cmd2;
+    }
+    else
+    {
+        /* let local view override */
+        return cmd1;
+    }
 }
-
 /*--------------------------------------------------------- */
-void clish_command_insert_param(clish_command_t * this, clish_param_t * param)
+int
+clish_command_diff(const clish_command_t *cmd1,
+                   const clish_command_t *cmd2)
 {
-	clish_paramv_insert(this->paramv, param);
+    if(NULL == cmd1)
+    {
+        if(NULL != cmd2)
+        {
+            return 1;
+        }
+        else
+        {
+            return 0;
+        }
+    }
+    if(NULL == cmd2)
+    {
+        return -1;
+    }
+    return lub_string_nocasecmp(clish_command__get_name(cmd1),
+                                clish_command__get_name(cmd2));
 }
-
+/*---------------------------------------------------------
+ * PUBLIC ATTRIBUTES
+ *--------------------------------------------------------- */
+const char *
+clish_command__get_name(const clish_command_t *this)
+{
+    return this->name;
+}
 /*--------------------------------------------------------- */
-int clish_command_help(const clish_command_t *this)
+const char *
+clish_command__get_text(const clish_command_t *this)
 {
-	this = this; /* Happy compiler */
-
-	return 0;
+    return this->text;
 }
-
 /*--------------------------------------------------------- */
-clish_command_t *clish_command_choose_longest(clish_command_t * cmd1,
-	clish_command_t * cmd2)
+const clish_param_t *
+clish_command_next_non_option(const clish_command_t *cmd,
+                              unsigned              *index)
 {
-	unsigned len1 = (cmd1 ? strlen(clish_command__get_name(cmd1)) : 0);
-	unsigned len2 = (cmd2 ? strlen(clish_command__get_name(cmd2)) : 0);
-
-	if (len2 < len1) {
-		return cmd1;
-	} else if (len1 < len2) {
-		return cmd2;
-	} else {
-		/* let local view override */
-		return cmd1;
-	}
+    const clish_param_t *param;
+    
+    while( NULL != (param = clish_command__get_param(cmd,(*index)++)) )
+    {
+        const clish_ptype_t *ptype  = clish_param__get_ptype(param);
+        const char        *prefix = clish_param__get_prefix(param);
+        
+        /* is this an "option" */
+        if((NULL == prefix) && (NULL != ptype))
+        {
+            /* found what we are looking for... */
+            break;
+        }
+    }
+    return param;
 }
-
 /*--------------------------------------------------------- */
-int clish_command_diff(const clish_command_t * cmd1,
-	const clish_command_t * cmd2)
+void
+clish_command__set_action(clish_command_t *this,
+                          const char      *action)
 {
-	if (NULL == cmd1) {
-		if (NULL != cmd2)
-			return 1;
-		else
-			return 0;
-	}
-	if (NULL == cmd2)
-		return -1;
-
-	return lub_string_nocasecmp(clish_command__get_name(cmd1),
-		clish_command__get_name(cmd2));
+    assert(NULL == this->action);
+    this->action = lub_string_dup(action);
 }
-
-CLISH_GET_STR(command, name);
-CLISH_GET_STR(command, text);
-CLISH_SET_STR_ONCE(command, detail);
-CLISH_GET_STR(command, detail);
-CLISH_GET(command, clish_action_t *, action);
-CLISH_GET(command, clish_config_t *, config);
-CLISH_SET_STR_ONCE(command, regex_chars);
-CLISH_GET_STR(command, regex_chars);
-CLISH_SET_STR_ONCE(command, escape_chars);
-CLISH_GET_STR(command, escape_chars);
-CLISH_SET_STR_ONCE(command, viewname);
-CLISH_GET_STR(command, viewname);
-CLISH_SET_STR_ONCE(command, viewid);
-CLISH_GET_STR(command, viewid);
-CLISH_SET_ONCE(command, clish_param_t *, args);
-CLISH_GET(command, clish_param_t *, args);
-CLISH_GET(command, clish_paramv_t *, paramv);
-CLISH_SET(command, clish_view_t *, pview);
-CLISH_GET(command, clish_view_t *, pview);
-CLISH_SET_STR(command, access);
-CLISH_GET_STR(command, access);
-CLISH_SET_STR(command, alias);
-CLISH_GET_STR(command, alias);
-CLISH_SET_STR(command, alias_view);
-CLISH_GET_STR(command, alias_view);
-CLISH_SET(command, bool_t, internal);
-CLISH_GET(command, bool_t, internal);
-CLISH_SET(command, bool_t, dynamic);
-CLISH_GET(command, bool_t, dynamic);
-
 /*--------------------------------------------------------- */
-void clish_command__force_viewname(clish_command_t * this, const char *viewname)
+const char *
+clish_command__get_detail(const clish_command_t *this)
 {
-	if (this->viewname)
-		lub_string_free(this->viewname);
-	this->viewname = lub_string_dup(viewname);
+    return this->detail;
 }
-
 /*--------------------------------------------------------- */
-void clish_command__force_viewid(clish_command_t * this, const char *viewid)
+void
+clish_command__set_detail(clish_command_t *this,
+                          const char      *detail)
 {
-	if (this->viewid)
-		lub_string_free(this->viewid);
-	this->viewid = lub_string_dup(viewid);
+    assert(NULL == this->detail);
+    this->detail = lub_string_dup(detail);
 }
-
 /*--------------------------------------------------------- */
-const clish_param_t *clish_command__get_param(const clish_command_t * this,
-	unsigned index)
+char *
+clish_command__get_action(const clish_command_t *this,
+                          const char            *viewid,
+                          clish_pargv_t         *pargv)
 {
-	return clish_paramv__get_param(this->paramv, index);
+    return clish_variable_expand(this->action,viewid,this,pargv);
 }
-
 /*--------------------------------------------------------- */
-const char *clish_command__get_suffix(const clish_command_t * this)
+void
+clish_command__set_view(clish_command_t *this,
+                        clish_view_t    *view)
 {
-	return lub_string_suffix(this->name);
+    assert(NULL == this->view);
+    this->view = view;
 }
-
 /*--------------------------------------------------------- */
-unsigned int clish_command__get_param_count(const clish_command_t * this)
+clish_view_t *
+clish_command__get_view(const clish_command_t *this)
 {
-	return clish_paramv__get_count(this->paramv);
+    return this->view;
 }
-
 /*--------------------------------------------------------- */
-int clish_command__get_depth(const clish_command_t * this)
+void
+clish_command__set_viewid(clish_command_t *this,
+                          const char    *viewid)
 {
-	if (!this->pview)
-		return 0;
-	return clish_view__get_depth(this->pview);
+    assert(NULL == this->viewid);
+    this->viewid = lub_string_dup(viewid);
 }
-
 /*--------------------------------------------------------- */
-clish_view_restore_e clish_command__get_restore(const clish_command_t * this)
+char *
+clish_command__get_viewid(const clish_command_t *this,
+                          const char            *viewid,
+                          clish_pargv_t         *pargv)
 {
-	if (!this->pview)
-		return CLISH_RESTORE_NONE;
-	return clish_view__get_restore(this->pview);
+    return clish_variable_expand(this->viewid,viewid,this,pargv);
 }
-
 /*--------------------------------------------------------- */
-const clish_command_t * clish_command__get_orig(const clish_command_t * this)
+const clish_param_t *
+clish_command__get_param(const clish_command_t *this,
+                         unsigned               index)
 {
-	if (this->link)
-		return clish_command__get_orig(this->link);
-	return this;
-}
+    clish_param_t *result = NULL;
 
-/*--------------------------------------------------------- */
-const clish_command_t * clish_command__get_cmd(const clish_command_t * this)
-{
-	if (!this->dynamic)
-		return this;
-	if (this->link)
-		return clish_command__get_cmd(this->link);
-	return NULL;
+    if(index < this->paramc)
+    {
+        result = this->paramv[index];
+    }
+    return result;
 }
+/*--------------------------------------------------------- */
+const clish_param_t *
+clish_command_find_option(const clish_command_t *this,
+                          const char            *name)
+{
+    clish_param_t *result = NULL;
+    unsigned       i;
+    
+    for(i=0;
+        i < this->paramc;
+        i++)
+    {
+        clish_param_t       *param  = this->paramv[i];
+        const char          *prefix;
+        const clish_ptype_t *ptype = clish_param__get_ptype(param);
+
+        prefix = ptype ? clish_param__get_prefix(param) : clish_param__get_name(param);
+
+        if((NULL != prefix) && (0 == strcmp(prefix,name)))
+        {
+            result = param;
+            break;
+        }
+    }
+    return result;
+}
+/*--------------------------------------------------------- */
+const char *
+clish_command__get_suffix(const clish_command_t *this)
+{
+    return lub_string_suffix(this->name);
+}
+/*--------------------------------------------------------- */
+void
+clish_command__set_builtin(clish_command_t *this,
+                           const char      *builtin)
+{
+    assert(NULL == this->builtin);
+    this->builtin = lub_string_dup(builtin);
+}
+/*--------------------------------------------------------- */
+const char *
+clish_command__get_builtin(const clish_command_t *this)
+{
+    return this->builtin;
+}
+/*--------------------------------------------------------- */
+void
+clish_command__set_escape_chars(clish_command_t *this,
+                                const char      *escape_chars)
+{
+    assert(NULL == this->escape_chars);
+    this->escape_chars = lub_string_dup(escape_chars);
+}
+/*--------------------------------------------------------- */
+const char *
+clish_command__get_escape_chars(const clish_command_t *this)
+{
+    return this->escape_chars;
+}
+/*--------------------------------------------------------- */
+void
+clish_command__set_args(clish_command_t *this,
+                        clish_param_t   *args)
+{
+    assert(NULL == this->args);
+    this->args = args;
+}
+/*--------------------------------------------------------- */
+const clish_param_t *
+clish_command__get_args(const clish_command_t *this)
+{
+    return this->args;
+}
+/*--------------------------------------------------------- */
+const unsigned
+clish_command__get_param_count(const clish_command_t *this)
+{
+    return this->paramc;
+}
+/*--------------------------------------------------------- */

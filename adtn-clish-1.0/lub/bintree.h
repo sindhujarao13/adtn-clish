@@ -119,9 +119,10 @@ typedef struct lub_bintree_node_s lub_bintree_node_t;
 /** 
  * CLIENTS MUSTN'T TOUCH THE CONTENTS OF THIS STRUCTURE
  */
-struct lub_bintree_node_s {
-	/** internal */ lub_bintree_node_t *left;
-	/** internal */ lub_bintree_node_t *right;
+struct lub_bintree_node_s
+{
+	/** internal */lub_bintree_node_t *left; 
+	/** internal */lub_bintree_node_t *right;
 };
 
 /**
@@ -137,7 +138,8 @@ struct lub_bintree_node_s {
  *     >0 if clientnode  > clientkey
  */
 typedef int
-lub_bintree_compare_fn(const void *clientnode, const void *clientkey);
+		lub_bintree_compare_fn(const void *clientnode,
+				       const void *clientkey);
 /**
  * This is used to size the key storage area for an opaque key.
  * If any client requires a greater storage size then this will need to
@@ -153,9 +155,10 @@ typedef struct lub_bintree_key_s lub_bintree_key_t;
 /** 
  * CLIENTS MUSTN'T TOUCH THE CONTENTS OF THIS STRUCTURE
  */
-struct lub_bintree_key_s {
-    /** internal */ char storage[lub_bintree_MAX_KEY_STORAGE];
-    /** internal */ int magic;
+struct lub_bintree_key_s
+{
+    /** internal */char storage[lub_bintree_MAX_KEY_STORAGE];
+    /** internal */int  magic;
 };
 
 /**
@@ -169,7 +172,8 @@ struct lub_bintree_key_s {
  * A "key" which corresponds the "node" in this view
  */
 typedef void
-lub_bintree_getkey_fn(const void *clientnode, lub_bintree_key_t * key);
+		lub_bintree_getkey_fn(const void        *clientnode,
+                		      lub_bintree_key_t *key);
 
 /**
  * This type represents an binary tree instance
@@ -178,11 +182,12 @@ typedef struct lub_bintree_s lub_bintree_t;
 /** 
  * CLIENTS MUSTN'T TOUCH THE CONTENTS OF THIS STRUCTURE
  */
-struct lub_bintree_s {
-	/** internal */ lub_bintree_node_t *root;
-	/** internal */ size_t node_offset;
-	/** internal */ lub_bintree_compare_fn *compareFn;
-	/** internal */ lub_bintree_getkey_fn *getkeyFn;
+struct lub_bintree_s
+{
+	/** internal */lub_bintree_node_t     *root;
+	/** internal */size_t                  node_offset;
+	/** internal */lub_bintree_compare_fn *compareFn;
+	/** internal */lub_bintree_getkey_fn  *getkeyFn;
 };
 
 /**
@@ -192,9 +197,10 @@ typedef struct lub_bintree_iterator_s lub_bintree_iterator_t;
 /** 
  * CLIENTS MUSTN'T TOUCH THE CONTENTS OF THIS STRUCTURE
  */
-struct lub_bintree_iterator_s {
-	/** internal */ lub_bintree_t *tree;
-    /** internal */ lub_bintree_key_t key;
+struct lub_bintree_iterator_s
+{
+	/** internal */lub_bintree_t    *tree;
+    /** internal */lub_bintree_key_t key;
 };
 
 /****************************************************************
@@ -207,26 +213,28 @@ struct lub_bintree_iterator_s {
  *
  * \post The tree is ready to have client nodes inserted.
  */
-extern void lub_bintree_init(
+extern void
+	lub_bintree_init(
 		/** 
 		* the "tree" instance to initialise 
 		*/
-				    lub_bintree_t * tree,
+		lub_bintree_t         *tree,
 		/** 
 		* the offset of the bintree "node" structure within the
 		* "clientnode" structure. This is typically passed 
 		* using the offsetof() macro.
 		*/
-				    size_t node_offset,
+		size_t                 node_offset,
 		/**
 		* a comparison function for comparing a "clientnode"
 		* with a "clientkey"
 		*/
-				    lub_bintree_compare_fn compareFn,
+		lub_bintree_compare_fn compareFn,
 		/**
 		* a function which will fill out a "key" from a clientnode
 		*/
-				    lub_bintree_getkey_fn getkeyFn);
+		lub_bintree_getkey_fn  getkeyFn
+	);
 
 /**
  * This operation is called to initialise a "clientnode" ready for
@@ -237,11 +245,13 @@ extern void lub_bintree_init(
  *
  * \post The node is ready to be inserted into a tree.
  */
-extern void lub_bintree_node_init(
+extern void
+		lub_bintree_node_init(
 			/** 
 			 * the bintree node to initialise
 			  */
-					 lub_bintree_node_t * node);
+			lub_bintree_node_t *node
+		);
 
 /*****************************************
  * NODE MANIPULATION OPERATIONS
@@ -260,16 +270,18 @@ extern void lub_bintree_node_init(
  * \post If the bintree "node" is already part of a tree, then an
  * assert will fire.
  */
-extern int lub_bintree_insert(
+extern int
+		lub_bintree_insert(
 			/**
 			 * the "tree" instance to invoke this operation upon
-			 */
-				     lub_bintree_t * tree,
+			 */ 
+			lub_bintree_t *tree,
 			/** 
 			 * a pointer to a client node. NB the tree can find the
 			 * necessary lub_BintreeNodeT from it's stored offset.
 			 */
-				     void *clientnode);
+			void          *clientnode
+		);
 
 /**
  * This operation removes a "clientnode" from the specified "tree"
@@ -282,15 +294,17 @@ extern int lub_bintree_insert(
  * \post If the clientnode is not present in the specified tree, then an
  *  assert will fire.
  */
-extern void lub_bintree_remove(
+extern void
+		lub_bintree_remove(
 			/** 
 			* the "tree" instance to invoke this operation upon
 			*/
-				      lub_bintree_t * tree,
+			lub_bintree_t *tree,
 			/**
 			* the node to remove
 			*/
-				      void *clientnode);
+			void          *clientnode
+		);
 
 /*****************************************
  * NODE RETRIEVAL OPERATIONS
@@ -303,11 +317,13 @@ extern void lub_bintree_remove(
  * \return
  * "clientnode" instance or NULL if no nodes are present in this tree.
  */
-extern void *lub_bintree_findfirst(
+extern void *
+	lub_bintree_findfirst(
 		/** 
 		 * the "tree" instance to invoke this operation upon
 		 */
-					  lub_bintree_t * tree);
+		lub_bintree_t *tree
+	);
 
 /**
  * This operation returns the last "clientnode" present in the specified "tree"
@@ -317,11 +333,13 @@ extern void *lub_bintree_findfirst(
  * \return
  * "clientnode" instance or NULL if no nodes are present in this tree.
  */
-extern void *lub_bintree_findlast(
+extern void *
+	lub_bintree_findlast(
 		/** 
 		* the "tree" instance to invoke this operation upon
 		*/
-					 lub_bintree_t * tree);
+		lub_bintree_t *tree
+	);
 
 /**
  * This operation searches the specified "tree" for a "clientnode" which matches the
@@ -332,15 +350,17 @@ extern void *lub_bintree_findlast(
  * \return
  * "clientnode" instance or NULL if no node is found.
  */
-extern void *lub_bintree_find(
+extern void *
+	lub_bintree_find(
 		/** 
 		 * the "tree" instance to invoke this operation upon
 		 */
-				     lub_bintree_t * tree,
+		lub_bintree_t *tree,
 		/** 
 		  * the "key" to search with
 		  */
-				     const void *key);
+        	const void    *key
+	);
 
 /**
  * This operation searches the specified "tree" for a "clientnode" which is
@@ -353,15 +373,17 @@ extern void *lub_bintree_find(
  * \return
  * "clientnode" instance or NULL if no node is found.
  */
-extern void *lub_bintree_findnext(
+extern void *
+	lub_bintree_findnext(
 		/** 
 		 * the "tree" instance to invoke this operation upon
 		 */
-					 lub_bintree_t * tree,
+		lub_bintree_t *tree,
 		/** 
 		  * the "key" to search with
 		  */
-					 const void *key);
+        	const void    *key
+	);
 
 /**
  * This operation searches the specified "tree" for a "clientnode" which is
@@ -374,15 +396,17 @@ extern void *lub_bintree_findnext(
  * \return
  * "clientnode" instance or NULL if no node is found.
  */
-extern void *lub_bintree_findprevious(
+extern void *
+	lub_bintree_findprevious(
 		/** 
 		 * the "tree" instance to invoke this operation upon
 		 */
-					     lub_bintree_t * tree,
+		lub_bintree_t *tree,
 		/** 
 		  * the "key" to search with
 		  */
-					     const void *key);
+                const void    *key
+	);
 
 /*****************************************
  * ITERATION OPERATIONS
@@ -398,19 +422,21 @@ extern void *lub_bintree_findprevious(
  *
  * \post The interator instance will be updated to reference the position in the tree for the clientnode.
  */
-extern void lub_bintree_iterator_init(
+extern void
+		lub_bintree_iterator_init(
 			/** 
 			* the iterator instance to initialise
 			*/
-					     lub_bintree_iterator_t * iter,
+			lub_bintree_iterator_t *iter,
 			/** 
 			* the tree to associate with this iterator
 			*/
-					     lub_bintree_t * tree,
+			lub_bintree_t          *tree,
 			/** 
 			 * the starting point for the iteration
 			 */
-					     const void *clientnode);
+			const void             *clientnode
+			);
 
 /**
  * This operation returns the next "clientnode" in an iteration.
@@ -423,11 +449,13 @@ extern void lub_bintree_iterator_init(
  *
  * \post The interator instance will be updated to reference the position in the tree for the returned value.
  */
-extern void *lub_bintree_iterator_next(
+extern void *
+	lub_bintree_iterator_next(
 		/** 
 		 * the iterator instance to invoke this operation upon.
 		 */
-					      lub_bintree_iterator_t * iter);
+		lub_bintree_iterator_t *iter
+	);
 
 /**
  * This operation returns the previous "clientnode" in an iteration.
@@ -440,12 +468,13 @@ extern void *lub_bintree_iterator_next(
  *
  * \post The interator instance will be updated to reference the position in the tree for the returned value.
  */
-extern void *lub_bintree_iterator_previous(
+extern void *
+	lub_bintree_iterator_previous(
 		/** 
 		 * the iterator instance to invoke this operation upon.
 		 */
-						  lub_bintree_iterator_t *
-						  iter);
+		lub_bintree_iterator_t *iter
+	);
 /**
  * This operation dumps the node list of the specified tree to stdout
  *
@@ -453,11 +482,14 @@ extern void *lub_bintree_iterator_previous(
  *
  * \post The structure of the tree will be unaltered.
  */
-extern void lub_bintree_dump(
+extern void
+	lub_bintree_dump(
 	/** 
 	 * the "tree" instance to invoke this operation upon
 	 */
-				    lub_bintree_t * tree);
+	lub_bintree_t *tree
+	);
 
-#endif				/* _lub_bintree_h */
+#endif /* _lub_bintree_h */
 /** @} */
+

@@ -34,14 +34,8 @@ If a "const char *" is returned then the client has no responsiblity for releasi
 #include <stddef.h>
 
 #include "lub/c_decl.h"
-#include "lub/types.h"
-
-#define UTF8_MASK 0xC0
-#define UTF8_7BIT_MASK 0x80 /* One byte or multibyte */
-#define UTF8_11   0xC0 /* First UTF8 byte */
-#define UTF8_10   0x80 /* Next UTF8 bytes */
-
 _BEGIN_C_DECL
+
 /**
  * This operation duplicates the specified string.
  *
@@ -55,11 +49,13 @@ _BEGIN_C_DECL
  * - The client is responsible for calling lub_string_free() with the
  *   returned string when they are finished using it.
  */
-char *lub_string_dup(
-	/** 
+char *
+    lub_string_dup(
+        /** 
          * The string to duplicate
          */
-			    const char *string);
+        const char *string
+    );
 /**
  * This operation concatinates the specified text onto an existing string.
  *
@@ -76,15 +72,17 @@ char *lub_string_dup(
  * - The client maintains responsibility for releasing the string reference
  *   by string_ptr when they are finished using it.
  */
-void lub_string_cat(
-	/** 
+void
+    lub_string_cat(
+        /** 
          * A pointer to the string to concatinate
          */
-			   char **string_ptr,
-	/** 
+        char      **string_ptr,
+        /** 
          * The text to be appended
          */
-			   const char *text);
+        const char *text
+    );
 /**
  * This operation concatinates a specified length of some text onto an
  * existing string.
@@ -105,19 +103,21 @@ void lub_string_cat(
  * - The client maintains responsibility for releasing the string reference
  *   by string_ptr when they are finished using it.
  */
-void lub_string_catn(
-	/** 
+void
+    lub_string_catn(
+        /** 
          * A pointer to the string to concatinate
          */
-			    char **string_ptr,
-	/** 
+        char      **string_ptr,
+        /** 
          * The text to be appended
          */
-			    const char *text,
-	/** 
+        const char *text,
+        /** 
          * The length of text to be appended
          */
-			    size_t length);
+        size_t      length
+    );
 /**
  * This operation dupicates a specified length of some text into a
  * new string.
@@ -132,15 +132,17 @@ void lub_string_catn(
  * - The client is responsible for calling lub_string_free() with the
  *   returned string when they are finished using it.
  */
-char *lub_string_dupn(
-	/** 
+char *
+    lub_string_dupn(
+        /** 
          * The string containing the text to duplicate
          */
-			     const char *string,
-	/** 
+        const char *string,
+        /** 
          * The length of text to be duplicated
          */
-			     unsigned length);
+        unsigned length
+    );
 /**
  * This operation returns a pointer to the last (space separated) word in the
  * specified string.
@@ -154,11 +156,13 @@ char *lub_string_dupn(
  * \post 
  * - none
  */
-const char *lub_string_suffix(
-	/**
+const char *
+    lub_string_suffix(
+        /**
          * The string from which to extract a suffix 
          */
-				     const char *string);
+        const char *string
+    );
 
 /**
  * This operation compares string cs to string ct in a case insensitive manner.
@@ -174,15 +178,17 @@ const char *lub_string_suffix(
  * \post 
  * - none
  */
-int lub_string_nocasecmp(
-	/**
+int
+    lub_string_nocasecmp(
+        /**
          * The first string for the comparison
          */
-				const char *cs,
-	/**
+        const char *cs,
+        /**
          * The second string for the comparison 
          */
-				const char *ct);
+        const char *ct
+    );
 /**
  * This operation performs a case insensitive search for a substring within
  * another string.
@@ -197,16 +203,18 @@ int lub_string_nocasecmp(
  * \post 
  * - none
  */
-const char *lub_string_nocasestr(
-	/**
+const char *
+    lub_string_nocasestr(
+        /**
          * The string within which to find a substring
          */
-					const char *cs,
-	/**
+        const char *cs,
+        /**
          * The substring for which to search
          */
-					const char *ct);
-
+        const char *ct
+    );
+        
 /**
  * This operation releases the resources associated with a dynamically allocated
  * string.
@@ -220,60 +228,16 @@ const char *lub_string_nocasestr(
  * \post 
  * - The string is no longer usable, any references to it must be discarded.
  */
-void lub_string_free(
-	/**
+void
+    lub_string_free(
+        /**
          * The string to be released
          */
-			    char *string);
+        char *string
+    );
 
-/*
- * These are the escape characters which are used by default when 
- * expanding variables. These characters will be backslash escaped
- * to prevent them from being interpreted in a script.
- *
- * This is a security feature to prevent users from arbitarily setting
- * parameters to contain special sequences.
- */
-extern const char *lub_string_esc_default;
-extern const char *lub_string_esc_regex;
-extern const char *lub_string_esc_quoted;
+ _END_C_DECL
 
-/**
- * This operation decode the escaped string.
- *
- * \pre
- * - none
- *
- * \return
- * - The allocated string without escapes.
- *
- * \post
- * - The result string must be freed after using.
- */
-char *lub_string_decode(const char *string);
-char *lub_string_ndecode(const char *string, unsigned int len);
-
-/**
- * This operation encode the string using escape.
- *
- * \pre
- * - none
- *
- * \return
- * - The allocated string with escapes.
- *
- * \post
- * - The result string must be freed after using.
- */
-char *lub_string_encode(const char *string, const char *escape_chars);
-
-char *lub_string_tolower(const char *str);
-unsigned int lub_string_equal_part(const char *str1, const char *str2,
-	bool_t utf8);
-const char *lub_string_nextword(const char *string,
-	size_t *len, size_t *offset, size_t *quoted);
-unsigned int lub_string_wordcount(const char *line);
-
-_END_C_DECL
-#endif				/* _lub_string_h */
+#endif /* _lub_string_h */
 /** @} */
+

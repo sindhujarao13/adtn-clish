@@ -36,12 +36,11 @@ basis.
 #ifndef _lub_ctype_h
 #define _lub_ctype_h
 
-#include <ctype.h>
-
 #include "lub/types.h"
-#include "lub/c_decl.h"
 
+#include "lub/c_decl.h"
 _BEGIN_C_DECL
+
 /**
  * This operation identifies whether a character is a decimal digit
  * or not.
@@ -56,11 +55,13 @@ _BEGIN_C_DECL
  * \post 
  * - none
  */
-bool_t lub_ctype_isdigit(
-	/** 
+bool_t
+    lub_ctype_isdigit(
+        /** 
          * The character to check
          */
-				char c);
+        char c
+    );
 /**
  * This operation identifies whether a character is a standard white space
  * character. (space, tab, carriage-return, vertical tab, form-feed)
@@ -75,11 +76,13 @@ bool_t lub_ctype_isdigit(
  * \post 
  * - none
  */
-bool_t lub_ctype_isspace(
-	/** 
+bool_t
+    lub_ctype_isspace(
+        /** 
          * The character to check
          */
-				char c);
+        char c
+    );
 /**
  * This operation converts an uppercase letter to the corresponding 
  * lowercase letter.
@@ -96,11 +99,13 @@ bool_t lub_ctype_isspace(
  * \post 
  * - none
  */
-char lub_ctype_tolower(
-	/** 
+char
+    lub_ctype_tolower(
+        /** 
          * The character to convert
          */
-			      char c);
+        char c
+    );
 /**
  * This operation converts a lowercase letter to the corresponding 
  * uppercase letter.
@@ -117,12 +122,16 @@ char lub_ctype_tolower(
  * \post 
  * - none
  */
-char lub_ctype_toupper(
-	/** 
+char
+    lub_ctype_toupper(
+        /** 
          * The character to convert
          */
-			      char c);
+        char c
+    );
 
 _END_C_DECL
-#endif				/* _lub_ctype_h */
+
+#endif /* _lub_ctype_h */
 /** @} */
+

@@ -1,163 +1,322 @@
 /*
- * pargv.c
+ * paramv.c
  */
 #include "private.h"
 #include "lub/string.h"
 #include "lub/argv.h"
-#include "lub/system.h"
 
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <assert.h>
 
 /*--------------------------------------------------------- */
 /*
  * Search for the specified parameter and return its value
  */
-static clish_parg_t *find_parg(clish_pargv_t * this, const char *name)
+static clish_parg_t *
+find_parg(clish_pargv_t *this,
+          const char    *name)
 {
-	unsigned i;
-	clish_parg_t *result = NULL;
+    unsigned      i;
+    clish_parg_t *result = NULL;
+    
+    /* scan the parameters in this instance */
+    for(i = 0;
+        i < this->pargc;
+        i++)
+    {
+        clish_parg_t *parg  = &this->pargs[i];
+        const char *pname = clish_param__get_name(parg->param);
 
-	if (!this || !name)
-		return NULL;
-
-	/* scan the parameters in this instance */
-	for (i = 0; i < this->pargc; i++) {
-		clish_parg_t *parg = this->pargv[i];
-		const char *pname = clish_param__get_name(parg->param);
-
-		if (0 == strcmp(pname, name)) {
-			result = parg;
-			break;
-		}
-	}
-	return result;
+        if (0==strcmp(pname,name))
+        {
+            result = parg;
+            break;
+        }
+    }
+    return result;
 }
-
 /*--------------------------------------------------------- */
-int clish_pargv_insert(clish_pargv_t * this,
-	const clish_param_t * param, const char *value)
+static void
+insert_parg(clish_pargv_t       *this,
+            const clish_param_t *param,
+            const char          *value)
 {
-	if (!this || !param)
-		return -1;
-
-	clish_parg_t *parg = find_parg(this, clish_param__get_name(param));
-
-	if (parg) {
-		/* release the current value */
-		lub_string_free(parg->value);
-	} else {
-		size_t new_size = ((this->pargc + 1) * sizeof(clish_parg_t *));
-		clish_parg_t **tmp;
-
-		/* resize the parameter vector */
-		tmp = realloc(this->pargv, new_size);
-		this->pargv = tmp;
-		/* insert reference to the parameter */
-		parg = malloc(sizeof(*parg));
-		this->pargv[this->pargc++] = parg;
-		parg->param = param;
-	}
-	parg->value = NULL;
-	if (value)
-		parg->value = lub_string_dup(value);
-
-	return 0;
+    clish_parg_t *parg = find_parg(this,clish_param__get_name(param));
+    
+    if(NULL != parg)
+    {
+        /* release the current value */
+        lub_string_free(parg->value);
+    }
+    else
+    {
+        /* use the current insertion point */
+        parg        = &this->pargs[this->pargc++];
+        parg->param = param;
+    }
+    parg->value = lub_string_dup(value);
 }
-
 /*--------------------------------------------------------- */
-clish_pargv_t *clish_pargv_new(void)
+static void
+set_defaults(clish_pargv_t         *this,
+             const clish_command_t *cmd)
 {
-	clish_pargv_t *this;
+    unsigned             index = 0;
+    const clish_param_t *param;
 
-	this = malloc(sizeof(clish_pargv_t));
-	this->pargc = 0;
-	this->pargv = NULL;
-
-	return this;
+    /* scan through all the parameters for this command */
+    while( (param = clish_command__get_param(cmd,index++)) )
+    {
+        const char *defval = clish_param__get_default(param);
+        if(NULL != defval)
+        {
+            if('\0' != *defval)
+            {
+                /* add the translated value to the vector */
+                char* translated = 
+                    clish_ptype_translate(clish_param__get_ptype(param),
+                                      defval);
+                insert_parg(this,param,translated);
+                lub_string_free(translated);
+            }
+            else
+            {
+                /* insert the empty default */
+                insert_parg(this,param,defval);
+            }
+                
+        }
+    }
 }
-
 /*--------------------------------------------------------- */
-clish_pargv_t *clish_pargv_clone(const clish_pargv_t *src)
+static clish_pargv_status_t
+clish_pargv_init(clish_pargv_t         *this,
+                 const clish_command_t *cmd,
+                 const lub_argv_t      *argv)
 {
-	clish_pargv_t *dst;
-	unsigned int i;
+    const clish_param_t *param;
+    unsigned             start = lub_argv_wordcount(clish_command__get_name(cmd));
+    unsigned             argc  = lub_argv__get_count(argv);
+    unsigned             index = 0;
+    unsigned             i;
 
-	if (!src)
-		return NULL;
+    /* 
+     * setup so that iteration will work during construction
+     */
+    this->pargc = 0;
 
-	dst = clish_pargv_new();
-	for (i = 0; i < src->pargc; i++) {
-		clish_pargv_insert(dst, src->pargv[i]->param, src->pargv[i]->value);
-	}
+    /* setup any defaulted parameters */
+    set_defaults(this,cmd);
 
-	return dst;
+    /*
+     * Skipping the command contribution to the line
+     * check each argument against the parameter details 
+     * NB we start at the first non-command related argument
+     */
+    for(i = start;
+        i < argc;
+        i++)
+    {
+        const char *arg = lub_argv__get_arg(argv,i);
+
+        /* is this an option identifier? */
+        param = clish_command_find_option(cmd,arg);
+        if(NULL != param)
+        {
+            /*
+             * Does it have a trailing argument for the value ?
+             */
+            if(NULL != clish_param__get_ptype(param))
+            {
+                i++; /* skip to the value part */
+                arg = lub_argv__get_arg(argv,i);
+                if(NULL == arg)
+                {
+                    const char *prefix = clish_param__get_prefix(param);
+                    size_t      offset = lub_argv__get_offset(argv,i-1);
+
+                    offset += strlen(prefix) + 1;
+                    clish_param_help(param,offset);
+                    return clish_BAD_PARAM;
+                }
+            }
+            else
+            {
+                /* just insert the flag */
+                arg = NULL;
+            }
+        }
+        else
+        {
+            /* not an option identifier, treat as next non-option argument */
+            param = clish_command_next_non_option(cmd,&index);
+        }
+
+        if(NULL != param)
+        {
+            /* validate the new value */
+            char *validated = arg ? clish_param_validate(param,arg) : NULL;
+            if(!arg || validated)
+            {
+                /* add (or update) this parameter */
+                insert_parg(this,param,validated);
+                lub_string_free(validated);
+            }
+            else
+            {
+                clish_param_help(param,lub_argv__get_offset(argv,i));
+                return clish_BAD_PARAM;
+            }
+        }
+        else
+        {
+            /* 
+             * if we've satisfied all the parameters we can now construct
+             * an 'args' parameter if one exists
+             */
+            if(NULL != (param = clish_command__get_args(cmd)))
+            {
+                /* 
+                 * put all the argument into a single string 
+                 */
+                char *args = NULL;
+                while(NULL != arg)
+                {
+                    bool_t quoted = lub_argv__get_quoted(argv,i);
+                    if(BOOL_TRUE == quoted) 
+                    {
+                        lub_string_cat(&args,"\"");
+                    }
+                    /* place the current argument in the string */
+                    lub_string_cat(&args,arg);
+                    if(BOOL_TRUE == quoted) 
+                    {
+                        lub_string_cat(&args,"\"");
+                    }
+                    i++;
+                    arg = lub_argv__get_arg(argv,i);
+                    if(NULL != arg)
+                    {
+                        /* add a space if there are more arguments */
+                        lub_string_cat(&args," ");
+                    }
+                }
+                /* add (or update) this parameter */
+                insert_parg(this,param,args);
+                lub_string_free(args);
+            }
+            else
+            {
+                printf("%*c\n",lub_argv__get_offset(argv,i),'^');
+                return clish_BAD_PARAM;
+            }
+        }
+    }
+    /* now check that any futher non-option parameters have got values */
+    while( (param = clish_command_next_non_option(cmd,&index)) )
+    {
+        if(NULL == find_parg(this,clish_param__get_name(param)))
+        {
+            /* failed to construct a valid command line */
+            size_t offset = lub_argv__get_offset(argv,i-1);
+            offset += strlen(lub_argv__get_arg(argv,i-1)) + 1;
+            clish_param_help(param,offset);
+            return clish_BAD_PARAM;
+        }
+    }
+    return clish_LINE_OK;
 }
-
 /*--------------------------------------------------------- */
-static void clish_pargv_fini(clish_pargv_t * this)
+clish_pargv_t *
+clish_pargv_new(const clish_command_t *cmd,
+                const char            *line,
+                size_t                 offset,
+                clish_pargv_status_t  *status)
 {
-	unsigned int i;
+    clish_pargv_t *this;
+    lub_argv_t   *argv       = lub_argv_new(line,offset);
+    unsigned      max_params = lub_argv__get_count(argv);
+    unsigned      cmd_params = clish_command__get_param_count(cmd);
+    size_t        size;
 
-	/* cleanup time */
-	for (i = 0; i < this->pargc; i++) {
-		lub_string_free(this->pargv[i]->value);
-		this->pargv[i]->value = NULL;
-		free(this->pargv[i]);
-	}
-	free(this->pargv);
+    if(max_params < cmd_params)
+    {
+        max_params = cmd_params;
+    }
+
+    /* -1 to account for the clish_parg_t present in clish_pargv_t */
+    size = sizeof(clish_parg_t)*(max_params-1) + sizeof(clish_pargv_t);
+
+    this = malloc(size);
+
+    if(NULL != this)
+    {
+        *status = clish_pargv_init(this,cmd,argv);
+        switch(*status)
+        {
+            case clish_LINE_OK:
+                break;
+            case clish_BAD_CMD:
+            case clish_BAD_PARAM:
+            case clish_BAD_HISTORY:
+                /* commit suicide */
+                clish_pargv_delete(this);
+                this = NULL;
+                break;
+        }
+    }
+
+    /* cleanup */
+    lub_argv_delete(argv);
+
+    return this;
 }
-
 /*--------------------------------------------------------- */
-void clish_pargv_delete(clish_pargv_t * this)
+static void
+clish_pargv_fini(clish_pargv_t *this)
 {
-	if (!this)
-		return;
-
-	clish_pargv_fini(this);
-	free(this);
+    unsigned i;
+    
+    /* cleanup time */
+    for(i = 0; 
+        i < this->pargc;
+        i++)
+    {
+        lub_string_free(this->pargs[i].value);
+        this->pargs[i].value = NULL;
+    }
 }
-
 /*--------------------------------------------------------- */
-unsigned clish_pargv__get_count(clish_pargv_t * this)
+void
+clish_pargv_delete(clish_pargv_t *this)
 {
-	if (!this)
-		return 0;
-	return this->pargc;
+    clish_pargv_fini(this);
+    free(this);
 }
-
 /*--------------------------------------------------------- */
-clish_parg_t *clish_pargv__get_parg(clish_pargv_t * this, unsigned int index)
+const char *
+clish_parg__get_value(const clish_parg_t *this)
 {
-	if (!this)
-		return NULL;
-	if (index >= this->pargc)
-		return NULL;
-	return this->pargv[index];
+    return this->value;
 }
-
 /*--------------------------------------------------------- */
-const clish_param_t *clish_pargv__get_param(clish_pargv_t * this,
-	unsigned index)
+const char *
+clish_parg__get_name(const clish_parg_t *this)
 {
-	clish_parg_t *tmp;
-
-	if (!this)
-		return NULL;
-	if (index >= this->pargc)
-		return NULL;
-	tmp = this->pargv[index];
-	return tmp->param;
+    return clish_param__get_name(this->param);
 }
-
 /*--------------------------------------------------------- */
-const clish_parg_t *clish_pargv_find_arg(clish_pargv_t * this, const char *name)
+const clish_ptype_t *
+clish_parg__get_ptype(const clish_parg_t *this)
 {
-	if (!this)
-		return NULL;
-	return find_parg(this, name);
+    return clish_param__get_ptype(this->param);
 }
-
+/*--------------------------------------------------------- */
+const clish_parg_t *
+clish_pargv_find_arg(clish_pargv_t *this,
+                   const char  *name)
+{
+    return find_parg(this,name);
+}
 /*--------------------------------------------------------- */

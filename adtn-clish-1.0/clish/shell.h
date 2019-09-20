@@ -13,223 +13,329 @@
 #define _clish_shell_h
 
 #include <stdio.h>
-#include <sys/types.h>
-#include <pwd.h>
+#include <pthread.h>
 
 #include "lub/c_decl.h"
 #include "lub/types.h"
 #include "lub/argv.h"
+
 #include "tinyrl/tinyrl.h"
-#include "clish/macros.h"
-#include "clish/view.h"
-#include "clish/ptype.h"
-#include "clish/var.h"
-#include "clish/plugin.h"
-#include "konf/net.h"
 
-#define CLISH_LOCK_PATH "/tmp/clish.lock"
-#define CLISH_LOCK_WAIT 20
+#include "view.h"
 
-#define CLISH_STDOUT_CHUNK 1024
-#define CLISH_STDOUT_MAXBUF (CLISH_STDOUT_CHUNK * 1024)
-
-#define CLISH_XML_ERROR_STR "Error parsing XML: "
-#define CLISH_XML_ERROR_ATTR(attr) CLISH_XML_ERROR_STR"The \""attr"\" attribute is required.\n"
+_BEGIN_C_DECL
 
 typedef struct clish_shell_s clish_shell_t;
-typedef struct clish_context_s clish_context_t;
 
-/* Context functions */
+/*=====================================
+ * SHELL INTERFACE
+ *===================================== */
+ /**
+  * A hook function used during the spawning of a new shell.
+  * 
+  * This will be invoked from the context of the spawned shell's thread
+  * and will be invoked just after the shell instance is created.
+  *
+  * This enables the client-specific initialisation of the spawned shell's
+  * thread
+  * e.g. to map the I/O streams, authenticate a user.
+  *
+  * N.B. It is possible for a client to have this invoked multiple times 
+  * if the user is spawning new shells using a commmand which uses the 
+  * "clish_spawn" builtin function. Hence the client should remember the 
+  * shell which first calls this function, and only assign resource (e.g. 
+  * setting up a script interpreter) for that call.
+  *
+  * \return
+  * - BOOL_TRUE if everything is OK
+  * - BOOL_FALSE if the shell should be immediately shut down.
+  *
+  */
+typedef bool_t 
+    clish_shell_init_fn_t(
+        /** 
+         * The shell instance which invoked this call
+         */
+        const clish_shell_t *shell
+    );
 
-_BEGIN_C_DECL
-clish_context_t *clish_context_new(clish_shell_t *shell);
-int clish_context_init(clish_context_t *instance, clish_shell_t *shell);
-void clish_context_free(clish_context_t *instance);
-int clish_context_dup(clish_context_t *dst, const clish_context_t *src);
+ /**
+  * A hook function used during the shutting down of a spawned shell
+  * 
+  * This will be invoked from the context of the spawned shell's thread
+  * and will be invoked just before the shell is destroyed.
+  *
+  * This enables the client-specific finalisation to occur.
+  * e.g. releasing any resource held by the cookie,
+  * shutting down telnet connections
+  *
+  * NB. This function may be called multiple times if a user is spawning
+  * new commands (via the "clish_spawn" builtin command), hence should use
+  * the reference to the root shell (remembered by the first call to clish_shell_init_fn_t callback)
+  * to signal when the cleanup should occur.
+  */
+typedef void 
+    clish_shell_fini_fn_t(
+        /** 
+         * The shell instance which invoked this call
+         */
+        const clish_shell_t *shell
+    );
 
-clish_shell_t *clish_context__get_shell(const void *instance);
-void clish_context__set_cmd(void *instance, const clish_command_t *cmd);
-const clish_command_t *clish_context__get_cmd(const void *instance);
-void clish_context__set_pargv(void *instance, clish_pargv_t *pargv);
-clish_pargv_t *clish_context__get_pargv(const void *instance);
-void clish_context__set_action(void *instance, const clish_action_t *action);
-const clish_action_t *clish_context__get_action(const void *instance);
-_END_C_DECL
+ /**
+  * A hook function used to indicate a command line has been executed and the 
+  * shell is about to prompt for the next command.
+  * 
+  * This will be invoked from the context of the spawned shell's thread
+  * and will be called once an ACTION has been performed.
+  * 
+  * A client may use this as a periodic indicator of CLI activity, 
+  * e.g. to manage session timeouts. In addition any required logging of 
+  * commands may be performed.
+  */
+typedef void 
+    clish_shell_cmd_line_fn_t(
+        /** 
+         * The shell instance which invoked this call
+         */
+        const clish_shell_t *instance,
+        /** 
+         * The text of the command line entered
+         */
+        const char *cmd_line
+    );
 
-/* Shell */
-
-typedef enum {
-	SHELL_STATE_OK = 0,
-	SHELL_STATE_UNKNOWN = 1,
-	SHELL_STATE_IO_ERROR = 2,
-	SHELL_STATE_SCRIPT_ERROR = 3,/* Script execution error */
-	SHELL_STATE_SYNTAX_ERROR = 4, /* Illegal line entered */
-	SHELL_STATE_SYSTEM_ERROR = 5, /* Some internal system error */
-	SHELL_STATE_INITIALISING = 6,
-	SHELL_STATE_HELPING = 7,
-	SHELL_STATE_EOF = 8, /* EOF of input stream */
-	SHELL_STATE_CLOSING = 9
-} clish_shell_state_e;
-
-typedef enum {
-	SHELL_VAR_NONE, /* Nothing to escape */
-	SHELL_VAR_ACTION, /* Variable expanding for ACTION script */
-	SHELL_VAR_REGEX /* Variable expanding for regex usage */
-} clish_shell_var_e;
-
-typedef enum {
-	SHELL_EXPAND_PARAM = 1,
-	SHELL_EXPAND_VIEW = 2,
-	SHELL_EXPAND_CONTEXT = 4,
-	SHELL_EXPAND_VAR = 8,
-	SHELL_EXPAND_ENV = 16,
-	SHELL_EXPAND_ALL = 255
-} clish_shell_expand_e;
-
-_BEGIN_C_DECL
-
-clish_shell_t *clish_shell_new(FILE *istream, FILE *ostream, bool_t stop_on_error);
-int clish_shell_startup(clish_shell_t *instance);
-void clish_shell_delete(clish_shell_t *instance);
-clish_view_t *clish_shell_find_create_view(clish_shell_t *instance, const char *name);
-clish_ptype_t *clish_shell_find_create_ptype(clish_shell_t *instance,
-	const char *name,
-	const char *text,
-	const char *pattern,
-	clish_ptype_method_e method,
-	clish_ptype_preprocess_e preprocess);
-clish_ptype_t *clish_shell_find_ptype(clish_shell_t *instance,
-	const char *name);
-void clish_shell_help(clish_shell_t * instance, const char *line);
-int clish_shell_exec_action(clish_context_t *context, char **out);
-int clish_shell_execute(clish_context_t *context, char **out);
-int clish_shell_forceline(clish_shell_t *instance, const char *line, char ** out);
-int clish_shell_readline(clish_shell_t *instance, char ** out);
-void clish_shell_dump(clish_shell_t * instance);
 /**
- * Push the specified file handle on to the stack of file handles
- * for this shell. The specified file will become the source of 
- * commands, until it is exhausted.
- *
- * \return
- * BOOL_TRUE - the file was successfully associated with the shell.
- * BOOL_FALSE - there was insufficient resource to associate this file.
- */
-int clish_shell_push_file(clish_shell_t * instance, const char * fname,
-	bool_t stop_on_error);
-int clish_shell_push_fd(clish_shell_t * instance, FILE * file,
-	bool_t stop_on_error);
-void clish_shell_insert_var(clish_shell_t *instance, clish_var_t *var);
-clish_var_t *clish_shell_find_var(clish_shell_t *instance, const char *name);
-char *clish_shell_expand_var(const char *name, clish_context_t *context);
-char *clish_shell_expand_var_ex(const char *name, clish_context_t *context, clish_shell_expand_e flags);
-char *clish_shell_expand(const char *str, clish_shell_var_e vtype, clish_context_t *context);
-char * clish_shell_mkfifo(clish_shell_t * instance, char *name, size_t n);
-int clish_shell_rmfifo(clish_shell_t * instance, const char *name);
+  * A hook function used to invoke the script associated with a command
+  * 
+  * This will be invoked from the context of the spawned shell's thread
+  * and will be invoked with the ACTION script which is to be performed.
+  * 
+  * The clish component will only pass down a call when a command has been
+  * correctly input.
+  *
+  * The client may choose to implement invocation of the script in a number of
+  * ways, which may include forking a sub-process or thread. It is important 
+  * that the call doesn't return until the script has been fully evaluated.
+  * 
+  * \return 
+  * - BOOL_TRUE  - if the script is executed without issue
+  * - BOOL_FALSE - if the script had an issue with execution.
+  *
+  * \post
+  * - If the script executes successfully then any "view" tag associated with the
+  *   command will be honored. i.e. the CLI will switch to the new view
+  */
+typedef bool_t
+    clish_shell_script_fn_t(
+        /** 
+         * The shell instance which invoked this call
+         */
+        const clish_shell_t *instance,
+        /** 
+         * The script to be evaluated
+         */
+        const char          *script
+    );
 
+ /**
+  * A hook function used to control access for the current user.
+  * 
+  * This will be invoked from the context of the spawned shell's thread
+  * and will be called during the parsing of the XML files.
+  * 
+  * The clish component will only insert a command into a view if the access 
+  * call is sucessfull.
+  *
+  * The client may choose to implement invocation of the script in a number of
+  * ways, which may include forking a sub-process or thread. It is important 
+  * that the call doesn't return until the script has been fully evaluated.
+  *
+  * \return
+  * - BOOL_TRUE  - if the user of the current CLISH session is permitted access
+  * - BOOL_FALSE - if the user of the current CLISH session is not permitted access
+  *
+  * \post
+  * - If access is granted then the associated command will be inserted into the
+  *   appropriate view.
+  */
+typedef bool_t 
+    clish_shell_access_fn_t(
+        /** 
+         * The shell instance which invoked this call
+         */
+        const clish_shell_t *instance,
+        /**
+         * A textual string which describes a limitation for a command. This
+         * string typically may be the name of a user group, of which the
+         * current user must be a member to grant access to a command.  
+         */
+        const char *access
+    );
+ /**
+  * A hook function used as a built in command callback
+  * 
+  * This will be invoked from the context of the spawned shell's thread
+  * and will be called during the execution of a builting command.
+  * 
+  * A client may register any number of these callbacks in its 
+  * clish_shell_builtin_cmds_t structure.
+  *
+  * \return
+  * - BOOL_TRUE  - if the command completes correctly
+  * - BOOL_FALSE - if the command fails.
+  *
+  */
+typedef bool_t 
+    clish_shell_builtin_fn_t(
+        /** 
+         * The shell instance which invoked this call
+         */
+        const clish_shell_t *instance,
+        /** 
+         * A vector of textual command line arguments.
+         */
+        const lub_argv_t *argv
+    );
+
+/** 
+ * A client of libclish may provide some builtin commands which will be
+ * interpreted by the framework, instead of the client's script engine.
+ */
+typedef struct
+{
+    const char               *name;     /**< The textual name to be used in 
+                                         *    the 'builtin' XML attribute"
+                                         */
+    clish_shell_builtin_fn_t *callback; /**< The function to be invoked */
+} clish_shell_builtin_t; 
+ 
+/** 
+ * A client of libclish will provide hooks for the control of the CLI within 
+ * a particular system.
+ * They will populate an instance of this structure and pass it into the 
+ */
+typedef struct
+{
+    clish_shell_init_fn_t        *init_fn;     /**< Initialisation call       */
+    clish_shell_access_fn_t      *access_fn;   /**< Access control call       */
+    clish_shell_cmd_line_fn_t    *cmd_line_fn; /**< Command line logging call */
+    clish_shell_script_fn_t      *script_fn;   /**< script evaluation call    */
+    clish_shell_fini_fn_t        *fini_fn;     /**< Finalisation call         */
+    const clish_shell_builtin_t *cmd_list;    /**< NULL terminated list      */
+} clish_shell_hooks_t;
 /*-----------------
- * attributes
+ * meta functions
  *----------------- */
-_CLISH_GET_STR(shell, overview);
-_CLISH_SET_STR(shell, lockfile);
-_CLISH_GET_STR(shell, lockfile);
-_CLISH_SET_STR(shell, default_shebang);
-_CLISH_GET_STR(shell, default_shebang);
-_CLISH_SET(shell, unsigned int, idle_timeout);
-_CLISH_SET(shell, unsigned int, wdog_timeout);
-_CLISH_GET(shell, unsigned int, wdog_timeout);
-_CLISH_GET(shell, unsigned int, depth);
-_CLISH_SET(shell, int, log_facility);
-_CLISH_GET(shell, int, log_facility);
-_CLISH_GET(shell, konf_client_t *, client);
-_CLISH_GET(shell, struct passwd *, user);
-_CLISH_SET(shell, clish_shell_state_e, state);
-_CLISH_GET(shell, clish_shell_state_e, state);
-_CLISH_SET(shell, bool_t, interactive);
-_CLISH_GET(shell, bool_t, interactive);
-_CLISH_SET(shell, bool_t, log);
-_CLISH_GET(shell, bool_t, log);
-_CLISH_SET(shell, bool_t, dryrun);
-_CLISH_GET(shell, bool_t, dryrun);
-_CLISH_SET(shell, bool_t, canon_out);
-_CLISH_GET(shell, bool_t, canon_out);
-
-clish_view_t *clish_shell__get_view(const clish_shell_t * instance);
-clish_view_t *clish_shell__set_depth(clish_shell_t *instance, unsigned int depth);
-const char *clish_shell__get_viewid(const clish_shell_t * instance);
-tinyrl_t *clish_shell__get_tinyrl(const clish_shell_t * instance);
-void clish_shell__set_pwd(clish_shell_t *instance, const char * line,
-	clish_view_t * view, const char * viewid, clish_context_t *context);
-char *clish_shell__get_pwd_line(const clish_shell_t * instance,
-	 unsigned int index);
-clish_pargv_t *clish_shell__get_pwd_pargv(const clish_shell_t *instance,
-	unsigned int index);
-char *clish_shell__get_pwd_cmd(const clish_shell_t *instance,
-	unsigned int index);
-char *clish_shell__get_pwd_prefix(const clish_shell_t *instance,
-	unsigned int index);
-char *clish_shell__get_pwd_full(const clish_shell_t * instance,
-	unsigned int depth);
-clish_view_t *clish_shell__get_pwd_view(const clish_shell_t * instance,
-	unsigned int index);
-FILE *clish_shell__get_istream(const clish_shell_t * instance);
-FILE *clish_shell__get_ostream(const clish_shell_t * instance);
-int clish_shell__set_socket(clish_shell_t * instance, const char * path);
-int clish_shell_load_scheme(clish_shell_t * instance, const char * xml_path, const char *xslt_path);
-int clish_shell_loop(clish_shell_t * instance);
-void clish_shell__set_startup_view(clish_shell_t * instance, const char * viewname);
-void clish_shell__set_startup_viewid(clish_shell_t * instance, const char * viewid);
-bool_t clish_shell__get_utf8(const clish_shell_t * instance);
-void clish_shell__set_utf8(clish_shell_t * instance, bool_t utf8);
-char *clish_shell__get_line(clish_context_t *context);
-char *clish_shell__get_full_line(clish_context_t *context);
-char *clish_shell__get_params(clish_context_t *context);
-int clish_shell_wdog(clish_shell_t *instance);
-int clish_shell__save_history(const clish_shell_t *instance, const char *fname);
-int clish_shell__restore_history(clish_shell_t *instance, const char *fname);
-void clish_shell__stifle_history(clish_shell_t *instance, unsigned int stifle);
-
-/* Plugin functions */
-clish_plugin_t * clish_shell_create_plugin(clish_shell_t *instance,
-	const char *name);
-clish_plugin_t * clish_shell_find_plugin(clish_shell_t *instance,
-	const char *name);
-clish_plugin_t * clish_shell_find_create_plugin(clish_shell_t *instance,
-	const char *name);
-int clish_shell_load_plugins(clish_shell_t *instance);
-int clish_shell_link_plugins(clish_shell_t *instance);
-
-/* Unresolved symbols functions */
-clish_sym_t *clish_shell_find_sym(clish_shell_t *instance,
-	const char *name, int type);
-clish_sym_t *clish_shell_add_sym(clish_shell_t *instance,
-	void *func, const char *name, int type);
-clish_sym_t *clish_shell_add_unresolved_sym(clish_shell_t *instance,
-	const char *name, int type);
-clish_sym_t *clish_shell_get_hook(const clish_shell_t *instance, int type);
-
-/* Hook wrappers */
-const void *clish_shell_check_hook(const clish_context_t *clish_context, int type);
-CLISH_HOOK_CONFIG(clish_shell_exec_config);
-CLISH_HOOK_LOG(clish_shell_exec_log);
-
-/* User data functions */
-void *clish_shell__get_udata(const clish_shell_t *instance, const char *name);
-void *clish_shell__del_udata(clish_shell_t *instance, const char *name);
-int clish_shell__set_udata(clish_shell_t *instance,
-	const char *name, void *data);
-
-/* Access functions */
-int clish_shell_prepare(clish_shell_t *instance);
-
+int
+    clish_shell_spawn_and_wait(const clish_shell_hooks_t *hooks,
+                               void                      *cookie);
+ /**
+  * This operation causes a separate (POSIX) thread of execution to 
+  * be spawned. This thread becomes responsible for the CLI session.
+  * 
+  * This will be invoked from the context of the spawned shell's thread
+  * and will be called during the execution of a builting command.
+  * 
+  * A client may register any number of these callbacks in its 
+  * clish_shell_builtin_cmds_t structure.
+  *
+  * \return
+  * - BOOL_TRUE  - if the thread was successfully spawned
+  * - BOOL_FALSE - if the thread failed to be spawned
+  *
+  */
+bool_t
+    clish_shell_spawn(
+        /** 
+         * A POSIX thread reference to fill out. This can be used
+         * to later control the spawned thread if necessary.
+         */
+        pthread_t *pthread,
+        /** 
+         * A POSIX thread attribute reference which will be used
+         * to define the thread which will be lanched. A value of
+         * NULL will use the system default.
+         */
+        const pthread_attr_t *attr,
+        /** 
+          * A reference to the clients hooks. These are used to 
+          * communicate back the client when client-specific actions
+          * are required.
+          */
+        const clish_shell_hooks_t *hooks,
+        /** 
+         * A client specific reference which can be obtained during
+         * a callback by invoking clish_shell__get_client_cookie()
+         */
+        void *cookie
+    );
+bool_t
+    clish_shell_spawn_from_file(const clish_shell_hooks_t *hooks,
+                                void                      *cookie,
+                                const                char *filename);
+        
+clish_shell_t *
+    clish_shell_new(const clish_shell_hooks_t *hooks,
+                    void                      *cookie,
+                    FILE                      *istream);
+/*-----------------
+ * methods
+ *----------------- */
 /*
- * Non shell specific functions.
- * Start and Stop XML parser engine.
+ * Called to invoke the startup command for this shell
  */
-int clish_xmldoc_start(void);
-int clish_xmldoc_stop(void);
+bool_t
+    clish_shell_startup(clish_shell_t *instance);
+void
+    clish_shell_delete(clish_shell_t *instance);
+clish_view_t *
+    clish_shell_find_create_view(clish_shell_t *instance,
+                                 const char    *name,
+                                 const char    *prompt);
+clish_ptype_t *
+    clish_shell_find_create_ptype(clish_shell_t           *instance,
+                                  const char              *name,
+                                  const char              *text,
+                                  const char              *pattern,
+                                  clish_ptype_method_e     method,
+                                  clish_ptype_preprocess_e preprocess);
+int
+    clish_shell_xml_read(clish_shell_t *instance,
+                         const char      *filename);
+void
+    clish_shell_help(clish_shell_t *instance,
+                     const char    *line);
+bool_t
+    clish_shell_execute(clish_shell_t         *instance,
+                        const clish_command_t *cmd,
+                        clish_pargv_t        **pargv);
+bool_t 
+    clish_shell_readline(clish_shell_t          *shell,
+                         const char             *prompt,
+                         const clish_command_t **cmd,
+                         clish_pargv_t         **pargv);
+void
+    clish_shell_set_context(clish_shell_t *instance,
+                            const char    *viewname);
+void
+    clish_shell_dump(clish_shell_t *instance);
+void
+    clish_shell_close(clish_shell_t *instance);
+/*-----------------
+ * attributes 
+ *----------------- */
+const clish_view_t *
+    clish_shell__get_view(const clish_shell_t *instance);
+const char *
+    clish_shell__get_viewid(const clish_shell_t *instance);
+const char *
+    clish_shell__get_overview(const clish_shell_t *instance);
+tinyrl_t *
+    clish_shell__get_tinyrl(const clish_shell_t *instance);
+void *
+    clish_shell__get_client_cookie(const clish_shell_t *instance);
 
 _END_C_DECL
-
-#endif				/* _clish_shell_h */
+#endif /* _clish_shell_h */
 /** @} clish_shell */
