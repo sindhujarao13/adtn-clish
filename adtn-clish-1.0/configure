@@ -22460,7 +22460,7 @@ fi
 ################################
 # Check for the TCL library
 ################################
-TCL_CONFIG=${libdir}/tclConfig.sh
+TCL_CONFIG=${tcldir}/tclConfig.sh
 
 
 # Check whether --with-tcl was given.
